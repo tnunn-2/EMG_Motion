@@ -4,8 +4,7 @@ __pycache__/
 *.pyc
 
 # Data (Large files should never be committed via standard Git)
-data/raw/
-data/processed/
+data/
 
 # IDE/Colab Files
 .idea/
