@@ -1,0 +1,12 @@
+# Dependencies
+venv/
+__pycache__/
+*.pyc
+
+# Data (Large files should never be committed via standard Git)
+data/raw/
+data/processed/
+
+# IDE/Colab Files
+.idea/
+.ipynb_checkpoints/
