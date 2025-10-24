@@ -1,11 +1,12 @@
 import numpy as np
 import scipy.io
 import os
+from pathlib import Path
 
 WINDOW_SIZE = 50
 OVERLAP_SIZE = 25
 
-def extractMavFeatures(signalWindow):
+def ExtractMavFeatures(signalWindow):
     """
     Calculates Mean Absolute Value (MAV) for each EMG channel.
     This feature is used for the LDA/SVM baseline.
@@ -14,7 +15,7 @@ def extractMavFeatures(signalWindow):
     return mavFeatures
 
 
-def loadAndProcessNinapro(dataPath, windowSize, overlapSize):
+def LoadAndProcess(dataPath, windowSize, overlapSize):
     """
     Loads one or more Ninapro files, applies a sliding window, and extracts MAV features.
     
@@ -48,7 +49,7 @@ def loadAndProcessNinapro(dataPath, windowSize, overlapSize):
         mat = scipy.io.loadmat(filePath)
         
         emgSignals = mat['emg'] # (samples, channels)
-        labels = mat['restimulus'].flatten() 
+        labels = mat['stimulus'].flatten() 
         
         stepSize = windowSize - overlapSize
         numSamples = emgSignals.shape[0]
@@ -64,26 +65,29 @@ def loadAndProcessNinapro(dataPath, windowSize, overlapSize):
             (uniqueLabels, counts) = np.unique(windowLabels, return_counts=True)
             mostFrequentLabel = uniqueLabels[np.argmax(counts)]
 
-            if mostFrequentLabel > 0: 
-                mavFeature = extractMavFeatures(windowedSignal) 
-                allFeatures.append(mavFeature)
-                allLabels.append(mostFrequentLabel)
+            mavFeature = ExtractMavFeatures(windowedSignal) 
+            allFeatures.append(mavFeature)
+            allLabels.append(mostFrequentLabel)
 
     X = np.array(allFeatures)
     Y = np.array(allLabels)
 
     print(f"\nSuccessfully processed {len(fileList)} file(s).")
     print(f"Final Dataset Shape: Features (X)={X.shape}, Labels (y)={Y.shape}")
-    return X, yLabels
+    return X, Y
 
 #test
 if __name__ == '__main__':
-    BASE_DATA = os.path.join('data', 'NinaproWebsite', 'DB1')
-    subjectDir = os.path.join(BASE_DATA, 'S1')
-    
-    print("\n--- Example 1: Loading ALL Experiment files for Subject S1 ---")
-    XFeaturesAll, yLabelsAll = loadAndProcessNinapro(subjectDir, WINDOW_SIZE, OVERLAP_SIZE)
+    PROJECT_ROOT = Path(__file__).parent.parent 
+    BASE_DATA = PROJECT_ROOT / 'data' / 'ninapro' / 'DB1'
+    subjectDir = BASE_DATA / 'S1'
+    if not subjectDir.is_dir():
+        print(f"\nFATAL ERROR: Subject directory not found at: {subjectDir}")
+        print("Please ensure your data is located in the exact structure.")
+    else:
+        print("\nExample 1: Loading ALL Experiment files for Subject S1")
+        XFeaturesAll, yLabelsAll = LoadAndProcess(str(subjectDir), WINDOW_SIZE, OVERLAP_SIZE)
 
-    print("\n--- Example 2: Loading ONLY the Grasping Primitives (E2) ---")
-    singleFile = os.path.join(subjectDir, 'S1/S1_A1_E2.mat')
-    XFeaturesE2, yLabelsE2 = loadAndProcessNinapro(singleFile, WINDOW_SIZE, OVERLAP_SIZE)
+        print("\nExample 2: Loading ONLY the Grasping Primitives (E2)")
+        singleFile = subjectDir / 'S1_A1_E2.mat'
+        XFeaturesE2, yLabelsE2 = LoadAndProcess(str(singleFile), WINDOW_SIZE, OVERLAP_SIZE)
