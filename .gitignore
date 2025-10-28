@@ -3,9 +3,11 @@
 __pycache__/
 *.pyc
 
-# Data (Large files should never be committed via standard Git)
+# Data
 data/
 
-# IDE/Colab Files
-.idea/
+# IDE Files
 .ipynb_checkpoints/
+
+#Other
+figures/

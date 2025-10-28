@@ -3,6 +3,70 @@ import scipy.io
 import os
 from pathlib import Path
 
+GESTURE_MAP_E1 = {
+    0: "Rest",
+    1: "Hand open",
+    2: "Hand close",
+    3: "Wrist extension",
+    4: "Wrist flexion",
+    5: "Wrist supination",
+    6: "Wrist pronation",
+    7: "Wrist abduction",
+    8: "Wrist adduction",
+    9: "Thumb flexion",
+    10: "Thumb extension",
+    11: "Index flexion",
+    12: "Index extension",
+    13: "Middle flexion",
+    14: "Middle extension",
+    15: "Ring flexion",
+    16: "Ring extension",
+    17: "Little flexion",
+    18: "Little extension"
+}
+
+GESTURE_MAP_E2 = {
+    0: "Rest",
+    1: "Spherical grasp",
+    2: "Tip pinch",
+    3: "Palmar pinch",
+    4: "Lateral grasp",
+    5: "Cylindrical grasp",
+    6: "Hook grasp",
+    7: "Platform grasp",
+    8: "Tripod grasp",
+    9: "Thumb–index grasp",
+    10: "Thumb–middle grasp",
+    11: "Thumb–ring grasp",
+    12: "Thumb–little grasp",
+    13: "Pointing index",
+    14: "Adduction of all fingers",
+    15: "Extension of all fingers"
+}
+
+GESTURE_MAP_E3 = {
+    0: "Rest",
+    1: "Wrist flexion + hand close",
+    2: "Wrist extension + hand open",
+    3: "Wrist pronation + hand close",
+    4: "Wrist supination + hand open",
+    5: "Wrist abduction + hand open",
+    6: "Wrist adduction + hand close",
+    7: "Wrist extension + finger extension",
+    8: "Wrist flexion + finger flexion",
+    9: "Hand open + wrist extension + thumb abduction",
+    10: "Power grasp",
+    11: "Key grasp",
+    12: "Pinch grasp",
+    13: "Pointing gesture",
+    14: "OK gesture",
+    15: "Thumbs up",
+    16: "Finger snap",
+    17: "Finger count (index to little)",
+    18: "Relaxation after gesture"
+}
+
+
 WINDOW_SIZE = 50
 OVERLAP_SIZE = 25
 
@@ -18,10 +82,6 @@ def ExtractMavFeatures(signalWindow):
 def LoadAndProcess(dataPath, windowSize, overlapSize):
     """
     Loads one or more Ninapro files, applies a sliding window, and extracts MAV features.
-    
-    dataPath: A string path. Can be:
-        1. A path to a single .mat file (e.g., '.../S1_A1_E2.mat')
-        2. A path to a directory containing .mat files (e.g., '.../S1')
     """
     
     fileList = []
@@ -75,6 +135,19 @@ def LoadAndProcess(dataPath, windowSize, overlapSize):
     print(f"\nSuccessfully processed {len(fileList)} file(s).")
     print(f"Final Dataset Shape: Features (X)={X.shape}, Labels (y)={Y.shape}")
     return X, Y
+
+def getGestureName(exercise_num: int, gesture_id: int) -> str:
+    """
+    Return the descriptive name of a Ninapro DB1 gesture based on exercise and label number.
+    """
+    if exercise_num == 1:
+        return GESTURE_MAP_E1.get(gesture_id, "Unknown")
+    elif exercise_num == 2:
+        return GESTURE_MAP_E2.get(gesture_id, "Unknown")
+    elif exercise_num == 3:
+        return GESTURE_MAP_E3.get(gesture_id, "Unknown")
+    else:
+        return "Unknown"
 
 #test
 if __name__ == '__main__':
