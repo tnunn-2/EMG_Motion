@@ -77,12 +77,6 @@ def ExtractMAV(signalWindow):
     """
     return np.mean(np.abs(signalWindow), axis=0)
 
-def ExtractVarFeatures(signalWindow):
-    """
-    Calculates Variance (VAR) for each EMG channel.
-    """
-    return np.var(signalWindow, axis=0)
-
 def ExtractAllFeatures(signalWindow):
     """
     Combines MAV, RMS, and VAR features into a single feature vector.
@@ -91,7 +85,9 @@ def ExtractAllFeatures(signalWindow):
     mav = ExtractMAV(signalWindow)
     rms = np.sqrt(np.mean(signalWindow ** 2, axis=0))
     var = np.var(signalWindow, axis=0)
-    return np.concatenate([mav, rms, var])
+    wl = np.sum(np.abs(np.diff(signalWindow, axis=0)), axis=0)
+    zc = np.sum(np.diff(np.sign(signalWindow), axis=0) != 0, axis=0)
+    return np.concatenate([mav, rms, var, wl, zc])
 
 def SlidingWindowGenerator(emgSignals, labels, windowSize, overlapSize):
     """
