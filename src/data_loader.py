@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 import scipy.io
 import os
@@ -70,22 +71,81 @@ GESTURE_MAP_E3 = {
 WINDOW_SIZE = 50
 OVERLAP_SIZE = 25
 
-def ExtractMavFeatures(signalWindow):
+def ExtractMAV(signalWindow):
     """
     Calculates Mean Absolute Value (MAV) for each EMG channel.
-    This feature is used for the LDA/SVM baseline.
     """
-    mavFeatures = np.mean(np.abs(signalWindow), axis=0)
-    return mavFeatures
+    return np.mean(np.abs(signalWindow), axis=0)
 
+def ExtractVarFeatures(signalWindow):
+    """
+    Calculates Variance (VAR) for each EMG channel.
+    """
+    return np.var(signalWindow, axis=0)
 
-def LoadAndProcess(dataPath, windowSize, overlapSize):
+def ExtractAllFeatures(signalWindow):
     """
-    Loads one or more Ninapro files, applies a sliding window, and extracts MAV features.
+    Combines MAV, RMS, and VAR features into a single feature vector.
+    Returns a flattened 1D array concatenating all features.
     """
+    mav = ExtractMAV(signalWindow)
+    rms = np.sqrt(np.mean(signalWindow ** 2, axis=0))
+    var = np.var(signalWindow, axis=0)
+    return np.concatenate([mav, rms, var])
+
+def SlidingWindowGenerator(emgSignals, labels, windowSize, overlapSize):
+    """
+    Generates windowedSignal and mostFrequentLabel for each sliding window.
+    """
+    stepSize = windowSize - overlapSize
+    numSamples = emgSignals.shape[0]
     
+    for start in range(0, numSamples - windowSize + 1, stepSize):
+        end = start + windowSize
+        windowedSignal = emgSignals[start:end, :]
+        windowLabels = labels[start:end]
+        
+        # Majority vote using np.unique() and np.argmax()
+        # Due to sorting of np.unique(), the lowest numerical value wins in case of tie
+        uniqueLabels, counts = np.unique(windowLabels, return_counts=True)
+        mostFrequentLabel = uniqueLabels[np.argmax(counts)]
+        
+        yield windowedSignal, mostFrequentLabel
+
+def BuildGestureDict(emgSignals, labels, windowSize=WINDOW_SIZE, overlapSize=OVERLAP_SIZE):
+    """
+    Builds a dictionary mapping gesture IDs to (average MAV, list of all feature windows).
+    """
+    gestureDict = {}
+
+    for windowedSignal, gestureId in SlidingWindowGenerator(emgSignals, labels, windowSize, overlapSize):
+        mav = ExtractMAV(windowedSignal)
+        features = ExtractAllFeatures(windowedSignal)
+        
+        if gestureId not in gestureDict:
+            gestureDict[gestureId] = {
+                "MAVs": [],
+                "features": []
+            }
+
+        gestureDict[gestureId]["MAVs"].append(mav)
+        gestureDict[gestureId]["features"].append(features)
+    
+    # Compute average MAV per gesture and format final output
+    finalDict = {}
+    for gestureId, data in gestureDict.items():
+        avgMav = np.mean(data["MAVs"], axis=0)
+        finalDict[gestureId] = (avgMav, data["features"])
+    
+    return finalDict
+
+def LoadAndProcess(dataPath, windowSize=WINDOW_SIZE, overlapSize=OVERLAP_SIZE):
+    """
+    Loads one or more .mat files, applies sliding window segmentation,
+    extracts MAV, RMS, and VAR features, and builds a gesture dictionary.
+    """
     fileList = []
-    
+
     if os.path.isfile(dataPath) and dataPath.lower().endswith('.mat'):
         fileList.append(dataPath)
     elif os.path.isdir(dataPath):
@@ -95,46 +155,46 @@ def LoadAndProcess(dataPath, windowSize, overlapSize):
                 fileList.append(os.path.join(dataPath, fileName))
     else:
         print(f"Error: Invalid path or file type provided: {dataPath}")
-        return np.array([]), np.array([])
+        return 0
 
     if not fileList:
         print(f"Warning: No .mat files found in {dataPath}. Check your directory structure.")
-        return np.array([]), np.array([])
-        
+        return 0
+
     allFeatures = []
     allLabels = []
-    
+    combinedGestureDict = {}
+
     for filePath in fileList:
         print(f"Processing file: {os.path.basename(filePath)}...")
         mat = scipy.io.loadmat(filePath)
-        
-        emgSignals = mat['emg'] # (samples, channels)
-        labels = mat['stimulus'].flatten() 
-        
-        stepSize = windowSize - overlapSize
-        numSamples = emgSignals.shape[0]
 
-        # Apply Sliding Window and Feature Extraction
-        for i in range(0, numSamples - windowSize + 1, stepSize):
-            windowStart = i
-            windowEnd = i + windowSize
-            
-            windowedSignal = emgSignals[windowStart:windowEnd, :]
-            
-            windowLabels = labels[windowStart:windowEnd]
-            (uniqueLabels, counts) = np.unique(windowLabels, return_counts=True)
-            mostFrequentLabel = uniqueLabels[np.argmax(counts)]
+        emgSignals = mat['emg']          # (samples, channels)
+        labels = mat['stimulus'].flatten()  # (samples,)
 
-            mavFeature = ExtractMavFeatures(windowedSignal) 
-            allFeatures.append(mavFeature)
-            allLabels.append(mostFrequentLabel)
+        gestureDict = BuildGestureDict(emgSignals, labels, windowSize, overlapSize)
+        
+        for gestureId, (avgMAV, features) in gestureDict.items():
+            if gestureId not in combinedGestureDict:
+                combinedGestureDict[gestureId] = (avgMAV, features)
+            else:
+                existingMAV, existingFeatures = combinedGestureDict[gestureId]
+                combinedGestureDict[gestureId] = (
+                    np.mean([existingMAV, avgMAV], axis=0),
+                    existingFeatures + features
+                )
+
+        # Flatten all windows for overall dataset representation
+        for gestureId, (_, features) in gestureDict.items():
+            allFeatures.extend(features)
+            allLabels.extend([gestureId] * len(features))
 
     X = np.array(allFeatures)
     Y = np.array(allLabels)
 
     print(f"\nSuccessfully processed {len(fileList)} file(s).")
-    print(f"Final Dataset Shape: Features (X)={X.shape}, Labels (y)={Y.shape}")
-    return X, Y
+    print(f"Final Dataset Shape: Features (X)={X.shape}, Labels (Y)={Y.shape}")
+    return combinedGestureDict, X, Y
 
 def getGestureName(exercise_num: int, gesture_id: int) -> str:
     """
@@ -159,8 +219,14 @@ if __name__ == '__main__':
         print("Please ensure your data is located in the exact structure.")
     else:
         print("\nExample 1: Loading ALL Experiment files for Subject S1")
-        XFeaturesAll, yLabelsAll = LoadAndProcess(str(subjectDir), WINDOW_SIZE, OVERLAP_SIZE)
+        largeDict, XFeaturesAll, yLabelsAll = LoadAndProcess(str(subjectDir))
+        print("Gestures found:", list(largeDict.keys()))
+        print("Gesture 0 avg MAV shape:", largeDict[0][0].shape)
+        print("Gesture 0 window count:", len(largeDict[0][1]))
 
         print("\nExample 2: Loading ONLY the Grasping Primitives (E2)")
         singleFile = subjectDir / 'S1_A1_E2.mat'
-        XFeaturesE2, yLabelsE2 = LoadAndProcess(str(singleFile), WINDOW_SIZE, OVERLAP_SIZE)
+        singleDict, XFeaturesE2, yLabelsE2 = LoadAndProcess(str(singleFile))
+        print("Gestures found:", list(singleDict.keys()))
+        print("Gesture 0 avg MAV shape:", singleDict[0][0].shape)
+        print("Gesture 0 window count:", len(singleDict[0][1]))
