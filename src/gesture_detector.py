@@ -8,6 +8,8 @@ from data_loader import LoadAndProcess
 from pathlib import Path
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import confusion_matrix, roc_auc_score
+
 
 
 def BuildRestData(gestureDict):
@@ -48,30 +50,55 @@ def BuildActiveData(gestureDict):
 def train(gestureDict):
     x, y = BuildRestData(gestureDict)
     xTrainRest, xTestRest, yTrainRest, yTestRest = train_test_split(x, y, test_size=0.2)
-    restClf = RandomForestClassifier(n_estimators=100)
-    restClf.fit(xTrainRest, yTrainRest)
+    
+    restScaler = StandardScaler()
+    xTrainScaledRest = restScaler.fit_transform(xTrainRest)
+    xTestScaledRest = restScaler.transform(xTestRest)
+    restClf = RandomForestClassifier(n_estimators=200, class_weight='balanced')
+    restClf.fit(xTrainScaledRest, yTrainRest)
+
 
     xActive, yActive = BuildActiveData(gestureDict)
     xTrainActive, xTestActive, yTrainActive, yTestActive = train_test_split(xActive, yActive, test_size = 0.2)
-    #scaler = StandardScaler()
-    #gestureClf = SVC(kernel='rbf', C=10, gamma='scale', probability=True)
     gestureClf, scaler = tuneSVC(xTrainActive, yTrainActive)
-    #xTrainScaled = scaler.fit_transform(xTrainActive)
     xTestScaled = scaler.transform(xTestActive)
-    #gestureClf.fit(xTrainScaled, yTrainActive)
 
     yPredGesture = gestureClf.predict(xTestScaled)
-    yPredRest = restClf.predict(xTestRest)
+    yPredRest = restClf.predict(xTestScaledRest)
 
-    print("Rest Detector Accuracy:{:.4f}".format(accuracy_score(yTestRest, yPredRest)))
-    print("Gesture Classifier (SVC) Accuracy:{:.4f}".format(accuracy_score(yTestActive, yPredGesture)))
+    print("Rest Detector Accuracy: {:.4f}".format(accuracy_score(yTestRest, yPredRest)))
+    print("Gesture Classifier (SVC) Accuracy: {:.4f}".format(accuracy_score(yTestActive, yPredGesture)))
 
+    # --- CONFUSION MATRIX & AUC METRICS ---
+    print("\n=== Rest Detector Metrics ===")
+    cm_rest = confusion_matrix(yTestRest, yPredRest)
+    print("Confusion Matrix (Rest Detector):\n", cm_rest)
+    
+    # For binary rest classifier
+    if len(np.unique(yTestRest)) == 2:
+        yScoreRest = restClf.predict_proba(xTestScaledRest)[:, 1]
+        auc_rest = roc_auc_score(yTestRest, yScoreRest)
+        print(f"ROC AUC (Rest Detector): {auc_rest:.4f}")
+    
+    print("\n=== Gesture Classifier Metrics ===")
+    cm_gesture = confusion_matrix(yTestActive, yPredGesture)
+    print("Confusion Matrix (Gesture Classifier):\n", cm_gesture)
+    
+    # For multi-class AUC (one-vs-rest)
+    try:
+        yScoreGesture = gestureClf.decision_function(xTestScaled)
+        auc_gesture = roc_auc_score(yTestActive, yScoreGesture, multi_class='ovr')
+        print(f"Mean ROC AUC (Gesture Classifier): {auc_gesture:.4f}")
+    except Exception:
+        print("Skipping gesture AUC (decision_function not supported for this model).")
+
+    # --- SAMPLE PREDICTIONS ---
     print("\nSample Gesture Predictions (True → Predicted):")
     for i in range(10):
         print(f"  {int(yTestActive[i]):>2} → {int(yPredGesture[i])}")
 
 
-    return restClf, gestureClf, scaler
+    return restClf, gestureClf, restScaler, scaler
     
 
 def tuneSVC(xActive, yActive):
@@ -108,23 +135,13 @@ def tuneSVC(xActive, yActive):
 if __name__ == '__main__':
     PROJECT_ROOT = Path(__file__).parent.parent 
     BASE_DATA = PROJECT_ROOT / 'data' / 'ninapro' / 'DB1'
-    subjectDir = BASE_DATA / 'S1'
-    singleFile = subjectDir / 'S1_A1_E2.mat'
+    subjectDir = BASE_DATA / 'E1'
+    singleFile = subjectDir / 'S1_A1_E1.mat'
 
-    print("\nLoading EMG data from: ", singleFile)
-    singleDict, xE2, yE2 = LoadAndProcess(str(singleFile))
+    print("\nLoading EMG data from: ", subjectDir)
+    singleDict, xE2, yE2 = LoadAndProcess(str(subjectDir))
     print("Gestures found:", list(singleDict.keys()))
 
 
     print("\nTraining model on data...")
-    restClf, gestureClf, scaler = train(singleDict)
-
-    testFeature = xE2[np.random.randint(0, len(xE2))]
-    restPred = restClf.predict([testFeature])[0]
-
-    if restPred == 0:
-        print("\nDetected Rest")
-    else:
-        gesturePred = gestureClf.predict(scaler.transform([testFeature]))[0]
-        print("\nDetected Gesture ID: ", gesturePred)
-    
+    restClf, gestureClf, restScaler, scaler = train(singleDict)

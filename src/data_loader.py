@@ -77,17 +77,30 @@ def ExtractMAV(signalWindow):
     """
     return np.mean(np.abs(signalWindow), axis=0)
 
+def ExtractFrequencyFeatures(signalWindow):
+    """
+    Calculate the mean and median frequency
+    """
+
+    freqs = np.fft.rfftfreq(signalWindow.shape[0])
+    fftVals = np.abs(np.fft.rfft(signalWindow, axis=0))
+    psd = fftVals**2
+    meanFreq = np.sum(freqs[:, None]*psd, axis=0) / np.sum(psd, axis=0)
+    medianFreq = np.array([freqs[np.searchsorted(np.cumsum(p), np.sum(p)/2)] for p in psd.T])
+    return meanFreq, medianFreq
+
 def ExtractAllFeatures(signalWindow):
     """
     Combines MAV, RMS, and VAR features into a single feature vector.
     Returns a flattened 1D array concatenating all features.
     """
     mav = ExtractMAV(signalWindow)
+    meanFreq, medianFreq = ExtractFrequencyFeatures(signalWindow)
     rms = np.sqrt(np.mean(signalWindow ** 2, axis=0))
     var = np.var(signalWindow, axis=0)
     wl = np.sum(np.abs(np.diff(signalWindow, axis=0)), axis=0)
     zc = np.sum(np.diff(np.sign(signalWindow), axis=0) != 0, axis=0)
-    return np.concatenate([mav, rms, var, wl, zc])
+    return np.concatenate([mav, rms, var, wl, zc, meanFreq, medianFreq])
 
 def SlidingWindowGenerator(emgSignals, labels, windowSize, overlapSize):
     """
@@ -167,6 +180,14 @@ def LoadAndProcess(dataPath, windowSize=WINDOW_SIZE, overlapSize=OVERLAP_SIZE):
 
         emgSignals = mat['emg']          # (samples, channels)
         labels = mat['stimulus'].flatten()  # (samples,)
+
+        # Normalize by the subject's rest data
+        # restMask = (labels == 0)
+        # restMean = np.mean(emgSignals[restMask, :], axis=0)
+        # restStd = np.std(emgSignals[restMask, :], axis=0)
+        # emgSignals = (emgSignals - restMean)/(restStd + np.finfo(float).eps)
+        # emgSignals = (emgSignals - np.mean(emgSignals, axis=0)) / (np.std(emgSignals, axis=0) + 1e-8)
+
 
         gestureDict = BuildGestureDict(emgSignals, labels, windowSize, overlapSize)
         
