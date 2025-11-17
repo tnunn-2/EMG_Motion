@@ -1,0 +1,348 @@
+<?xml version="1.0"?>
+<robot name="allegro_wrist_local">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 -0.08"/>
+      <geometry><cylinder length="0.16" radius="0.04"/></geometry>
+    </visual>
+  </link>
+  <link name="wrist_pitch_link"/>
+  <joint name="wrist_flex" type="revolute">
+    <parent link="base_link"/><child link="wrist_pitch_link"/><origin xyz="0 0 0.08"/>
+    <axis xyz="0 1 0"/><limit lower="-1.2" upper="1.2" effort="20" velocity="2.0"/>
+  </joint>
+  <link name="wrist_roll_link"/>
+  <joint name="wrist_dev" type="revolute">
+    <parent link="wrist_pitch_link"/><child link="wrist_roll_link"/><origin xyz="0 0 0.06"/>
+    <axis xyz="1 0 0"/><limit lower="-0.9" upper="0.9" effort="15" velocity="2.0"/>
+  </joint>
+  <link name="wrist_yaw_link"/>
+  <joint name="wrist_rotate" type="revolute">
+    <parent link="wrist_roll_link"/><child link="wrist_yaw_link"/><origin xyz="0 0 0.06"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="10" velocity="3.0"/>
+  </joint>
+  <link name="palm_link"/>
+  <joint name="palm_mount" type="fixed">
+    <parent link="wrist_yaw_link"/><child link="palm_link"/><origin xyz="0.06 0 0.02"/>
+  </joint>
+  <link name="thumb_base"/>
+  <joint name="thumb_base_joint" type="fixed">
+    <parent link="palm_link"/><child link="thumb_base"/><origin xyz="0.06 0.03 0.02"/>
+  </joint>
+  <link name="thumb_link_0">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_0.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_0.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="thumb_joint_0" type="revolute">
+    <parent link="thumb_base"/><child link="thumb_link_0"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="thumb_link_1">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_1.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="thumb_joint_1" type="revolute">
+    <parent link="thumb_link_0"/><child link="thumb_link_1"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="thumb_link_2">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_2.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_2.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="thumb_joint_2" type="revolute">
+    <parent link="thumb_link_1"/><child link="thumb_link_2"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="thumb_link_3">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_3.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="thumb_joint_3" type="revolute">
+    <parent link="thumb_link_2"/><child link="thumb_link_3"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="index_base"/>
+  <joint name="index_base_joint" type="fixed">
+    <parent link="palm_link"/><child link="index_base"/><origin xyz="0.06 0.012 0.02"/>
+  </joint>
+  <link name="index_link_0">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_4.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_4.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="index_joint_0" type="revolute">
+    <parent link="index_base"/><child link="index_link_0"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="index_link_1">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_5.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_5.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="index_joint_1" type="revolute">
+    <parent link="index_link_0"/><child link="index_link_1"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="index_link_2">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_6.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="index_joint_2" type="revolute">
+    <parent link="index_link_1"/><child link="index_link_2"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="index_link_3">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_7.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_7.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="index_joint_3" type="revolute">
+    <parent link="index_link_2"/><child link="index_link_3"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="middle_base"/>
+  <joint name="middle_base_joint" type="fixed">
+    <parent link="palm_link"/><child link="middle_base"/><origin xyz="0.06 -0.012 0.02"/>
+  </joint>
+  <link name="middle_link_0">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_8.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_8.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="middle_joint_0" type="revolute">
+    <parent link="middle_base"/><child link="middle_link_0"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="middle_link_1">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_9.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_9.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="middle_joint_1" type="revolute">
+    <parent link="middle_link_0"/><child link="middle_link_1"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="middle_link_2">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_10.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_10.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="middle_joint_2" type="revolute">
+    <parent link="middle_link_1"/><child link="middle_link_2"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="middle_link_3">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="middle_joint_3" type="revolute">
+    <parent link="middle_link_2"/><child link="middle_link_3"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="ring_base"/>
+  <joint name="ring_base_joint" type="fixed">
+    <parent link="palm_link"/><child link="ring_base"/><origin xyz="0.06 -0.03 0.02"/>
+  </joint>
+  <link name="ring_link_0">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_12.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_12.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ring_joint_0" type="revolute">
+    <parent link="ring_base"/><child link="ring_link_0"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="ring_link_1">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_13.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_13.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ring_joint_1" type="revolute">
+    <parent link="ring_link_0"/><child link="ring_link_1"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="ring_link_2">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_14.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_14.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ring_joint_2" type="revolute">
+    <parent link="ring_link_1"/><child link="ring_link_2"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+  <link name="ring_link_3">
+    <visual>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/link_15.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.03 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/collision/link_15.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ring_joint_3" type="revolute">
+    <parent link="ring_link_2"/><child link="ring_link_3"/><origin xyz="0 0 0.03"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.6" effort="5" velocity="3.0"/>
+  </joint>
+</robot>
