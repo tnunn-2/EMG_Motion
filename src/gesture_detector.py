@@ -11,10 +11,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import confusion_matrix, roc_auc_score
 from collections import defaultdict
 from sklearn.neighbors import KNeighborsClassifier
-from DANN import DANN, train_dann
+from DANN import DANN, train_dann, few_shot_on_dann
 import torch
+import os
 
-
+os.environ["LOKY_MAX_CPU_COUNT"] = "4"
 
 def BuildRestData(gestureDict):
     """
@@ -166,7 +167,8 @@ def losoEvaluate(
         "baseline": {},
         "fewshot_prototype": {},
         "fewshot_knn": {},
-        "dann": {}
+        "dann": {},
+        "finetune_dann": {}
     }
 
     print(f"\nRunning LOSO on subjects: {subjects}")
@@ -197,39 +199,6 @@ def losoEvaluate(
         acc_base = accuracy_score(y_test, y_pred_baseline)
         results["baseline"][test_subj] = acc_base
         print(f"[Baseline LOSO] Accuracy: {acc_base:.4f}")
-
-        if do_dann:
-            print(f"\n --- Training DANN on LOSO split (source={train_subjects}, target={test_subj}) ---")
-
-            src_dataset = torch.utils.data.TensorDataset(
-                torch.tensor(X_train, dtype=torch.float32),
-                torch.tensor(y_train, dtype=torch.long)
-            )
-            tgt_dataset = torch.utils.data.TensorDataset(
-                torch.tensor(X_test, dtype=torch.float32),
-                torch.zeros(len(X_test), dtype=torch.long)   # unlabeled
-            )
-
-            src_loader = torch.utils.data.DataLoader(src_dataset, batch_size=dann_batch, shuffle=True)
-            tgt_loader = torch.utils.data.DataLoader(tgt_dataset, batch_size=dann_batch, shuffle=True)
-
-            model = DANN(
-                input_dim=X_train.shape[1],
-                hidden_dim=128,
-                num_classes=len(np.unique(y_train))
-            )
-
-            train_dann(model, src_loader, tgt_loader, num_epochs=dann_epochs, device=device)
-
-            model.eval()
-            with torch.no_grad():
-                xt = torch.tensor(X_test, dtype=torch.float32).to(device)
-                class_out, _ = model(xt, alpha=0)
-                dann_preds = torch.argmax(class_out, dim=1).cpu().numpy()
-
-            acc_dann = np.mean(dann_preds == y_test)
-            results["dann"][test_subj] = acc_dann
-            print(f"[DANN LOSO] Accuracy: {acc_dann:.4f}")
 
         if few_shot_K is None:
             continue
@@ -279,7 +248,7 @@ def losoEvaluate(
 
             acc_proto = accuracy_score(y_eval, y_pred_proto)
             results["fewshot_prototype"][test_subj] = acc_proto
-            print(f"[Few-shot Prototype] Accuracy: {acc_proto:.4f}")
+            
 
         if do_knn:
             knn = KNeighborsClassifier(n_neighbors=knn_neighbors)
@@ -289,10 +258,80 @@ def losoEvaluate(
             y_pred_knn = knn.predict(X_eval_fs)
             acc_knn = accuracy_score(y_eval, y_pred_knn)
             results["fewshot_knn"][test_subj] = acc_knn
-            print(f"[Few-shot kNN-{knn_neighbors}] Accuracy: {acc_knn:.4f}")
+            
+        
+        if do_dann:
+            results = doDANN(train_subjects, 
+                    X_train, y_train, X_test, y_test, test_subj,
+                    dann_batch, dann_epochs, device,
+                    results)
 
+
+        if do_prototype:
+            print(f"[Few-shot Prototype] Accuracy: {acc_proto:.4f}")
+        if do_knn:
+            print(f"[Few-shot kNN-{knn_neighbors}] Accuracy: {acc_knn:.4f}")
     return results
 
+def doDANN(train_subjects, X_train, y_train, X_test, y_test, test_subj,
+            dann_batch, dann_epochs, device, results):
+    print(f"\n --- Training DANN on LOSO split (source={train_subjects}, target={test_subj}) ---")
+
+    src_dataset = torch.utils.data.TensorDataset(
+        torch.tensor(X_train, dtype=torch.float32),
+        torch.tensor(y_train, dtype=torch.long)
+    )
+    tgt_dataset = torch.utils.data.TensorDataset(
+        torch.tensor(X_test, dtype=torch.float32),
+        torch.zeros(len(X_test), dtype=torch.long)   # unlabeled
+    )
+
+    src_loader = torch.utils.data.DataLoader(src_dataset, batch_size=dann_batch, shuffle=True)
+    tgt_loader = torch.utils.data.DataLoader(tgt_dataset, batch_size=dann_batch, shuffle=True)
+
+    model = DANN(
+        input_dim=X_train.shape[1],
+        hidden_dim=128,
+        num_classes=len(np.unique(y_train))
+    )
+
+    train_dann(model, src_loader, tgt_loader, num_epochs=dann_epochs, device=device)
+
+    model.eval()
+    with torch.no_grad():
+        xt = torch.tensor(X_test, dtype=torch.float32).to(device)
+        class_out, _ = model(xt, alpha=0)
+        dann_preds = torch.argmax(class_out, dim=1).cpu().numpy()
+
+    acc_dann = np.mean(dann_preds == y_test)
+    results["dann"][test_subj] = acc_dann
+    print(f"[DANN LOSO] Accuracy: {acc_dann:.4f}")
+
+    # run few-shot on DANN latent space, with optional finetune
+    fs_results = few_shot_on_dann(
+        model,
+        X_train, y_train,
+        X_test, y_test,
+        few_shot_K=5,
+        n_neighbors=3,
+        alpha=0.5,
+        finetune=True,        # <-- set True to run fine-tuning on K-shot
+        ft_epochs=20,
+        ft_lr=1e-3,
+        device=device
+    )
+
+    print("DANN-latent few-shot (before finetune): proto = {:.4f}, knn = {:.4f}".format(
+        fs_results['proto_before_acc'], fs_results['knn_before_acc']
+    ))
+    if fs_results.get('head') is not None:
+        print("After finetune: proto = {:.4f}, knn = {:.4f}".format(
+            fs_results.get('proto_after_acc'), fs_results.get('knn_after_acc')
+        ))
+    
+    results["finetune_dann"][test_subj] = fs_results
+
+    return results
 
 
 def predictGesture(emg_frame, restClf, gestureClf, restScaler, scaler):
@@ -329,7 +368,7 @@ if __name__ == '__main__':
     # print("\nTraining model on data...")
     # restClf, gestureClf, restScaler, scaler = train(singleDict)
 
-    subjectList = [1, 2, 3, 4, 5]
+    subjectList = [1, 2, 3]
     print("\nLoading EMG data from: ", subjectDir)
     singleDict = BuildSubjectDict(subjectList, 2)
     print("Subjects found:", list(singleDict.keys()))

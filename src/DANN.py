@@ -188,10 +188,17 @@ def finetune_encoder_on_calib(model, X_calib, y_calib, device="cpu",
     model.train()
 
     # small classification head on top of encoder
-    hidden_dim = list(model.encoder.net.children())[-2].out_features if hasattr(model.encoder, "net") else None
+    # hidden_dim = list(model.encoder.net.children())[-2].out_features if hasattr(model.encoder, "net") else None
+
+    linear_layers = [l for l in model.encoder.net.children() if isinstance(l, nn.Linear)]
+    if len(linear_layers) == 0:
+        raise ValueError("No linear layers found in encoder")
+    hidden_dim = linear_layers[-1].out_features
+
     # Instead of trying to introspect, add a new head using encoder output size by probing one sample:
     with torch.no_grad():
         probe = torch.tensor(X_calib[:1], dtype=torch.float32).to(device)
+        model.encoder.eval() 
         h_probe = model.encoder(probe)
         feat_dim = h_probe.shape[1]
 
