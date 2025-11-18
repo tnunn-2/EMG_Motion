@@ -1,25 +1,31 @@
 import pybullet as p
 import pybullet_data
 import os
-import time
 
-p.connect(p.GUI)
-p.setGravity(0, 0, -9.81)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
+def load_kuka():
+    """
+    Loads the KUKA iiwa arm and returns:
+    - robot ID
+    - end-effector link index (6)
+    """
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.loadURDF("plane.urdf")
 
-p.loadURDF("plane.urdf")
+    iiwa = p.loadURDF(
+        "kuka_iiwa/model.urdf",
+        basePosition=[0, 0, 0],
+        useFixedBase=True
+    )
 
-iiwa = p.loadURDF("kuka_iiwa/model.urdf",
-                  basePosition=[0, 0, 0],
-                  useFixedBase=True)
+    ee_link = 6 
+    return iiwa, ee_link
 
-# hand_dir = os.path.join(os.path.dirname(__file__), "robot_model", "shadow_hand2")
-# p.setAdditionalSearchPath(hand_dir)
 
-# hand = p.loadURDF("shadow_hand_right.urdf",
-#                   basePosition=[0, 0, 0])
+def connect_gui():
+    """Connect to PyBullet in GUI mode and set gravity."""
+    p.connect(p.GUI)
+    p.setGravity(0, 0, -9.81)
 
-EE_LINK = 6 
 
-while p.isConnected():
-    time.sleep(0.1)
+def step():
+    p.stepSimulation()

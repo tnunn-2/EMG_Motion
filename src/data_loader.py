@@ -148,6 +148,26 @@ def BuildGestureDict(emgSignals, labels, windowSize=WINDOW_SIZE, overlapSize=OVE
     
     return finalDict
 
+def BuildSubjectDict(subjectList, Enum):
+    PROJECT_ROOT = Path(__file__).parent.parent 
+    BASE_DATA = PROJECT_ROOT / 'data' / 'ninapro' / 'DB1'
+
+    allSubjectDicts = {}
+    for s in subjectList:
+        subjectDir = BASE_DATA / f"S{s}" / f"S{s}_A1_E{Enum}.mat"
+        gestureDict, features, labels = LoadAndProcess(subjectDir)
+        mean_feat = features.mean(axis=0)
+        std_feat = features.std(axis=0)
+        # features = (features - mean_feat) / (std_feat + 1e-8)
+        
+        # Store normalized features
+        allSubjectDicts[s] = {'gestureDict': gestureDict,
+                              'features': features,
+                              'labels': labels}
+
+    return allSubjectDicts
+
+
 def LoadAndProcess(dataPath, windowSize=WINDOW_SIZE, overlapSize=OVERLAP_SIZE):
     """
     Loads one or more .mat files, applies sliding window segmentation,
@@ -155,12 +175,12 @@ def LoadAndProcess(dataPath, windowSize=WINDOW_SIZE, overlapSize=OVERLAP_SIZE):
     """
     fileList = []
 
-    if os.path.isfile(dataPath) and dataPath.lower().endswith('.mat'):
+    if os.path.isfile(dataPath) and str(dataPath).lower().endswith('.mat'):
         fileList.append(dataPath)
     elif os.path.isdir(dataPath):
         print(f"Searching for .mat files in directory: {dataPath}")
         for fileName in os.listdir(dataPath):
-            if fileName.lower().endswith('.mat'):
+            if str(fileName).lower().endswith('.mat'):
                 fileList.append(os.path.join(dataPath, fileName))
     else:
         print(f"Error: Invalid path or file type provided: {dataPath}")
