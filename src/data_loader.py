@@ -102,6 +102,29 @@ def ExtractAllFeatures(signalWindow):
     zc = np.sum(np.diff(np.sign(signalWindow), axis=0) != 0, axis=0)
     return np.concatenate([mav, rms, var, wl, zc, meanFreq, medianFreq])
 
+
+def WindowData(X, y, window=20, stride=5):
+    """
+    Maintains temporal structure
+    Returns:
+        Xw: (N_windows, F, window)
+        yw: (N_windows,)
+    """
+    X = np.array(X)
+    y = np.array(y)
+
+    N, F = X.shape
+    windows = []
+    labels = []
+
+    for start in range(0, N - window, stride):
+        end = start + window
+        windows.append(X[start:end].T)
+        labels.append(y[start + window // 2])
+
+    return np.stack(windows), np.array(labels)
+
+
 def SlidingWindowGenerator(emgSignals, labels, windowSize, overlapSize):
     """
     Generates windowedSignal and mostFrequentLabel for each sliding window.

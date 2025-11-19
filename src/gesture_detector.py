@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-from data_loader import LoadAndProcess, BuildSubjectDict
+from data_loader import LoadAndProcess, BuildSubjectDict, WindowData
 from pathlib import Path
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
@@ -14,6 +14,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from DANN import DANN, train_dann, few_shot_on_dann
 import torch
 import os
+from show_results import plot_loso_results, plot_single_subject_results
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "4"
 
@@ -261,7 +262,7 @@ def losoEvaluate(
             
         
         if do_dann:
-            results = doDANN(train_subjects, 
+            results, encoderPath, headPath = doDANN(train_subjects, 
                     X_train, y_train, X_test, y_test, test_subj,
                     dann_batch, dann_epochs, device,
                     results)
@@ -271,10 +272,18 @@ def losoEvaluate(
             print(f"[Few-shot Prototype] Accuracy: {acc_proto:.4f}")
         if do_knn:
             print(f"[Few-shot kNN-{knn_neighbors}] Accuracy: {acc_knn:.4f}")
-    return results
+    return results, encoderPath, headPath, restClf, restScaler, gestureClf, scaler
 
 def doDANN(train_subjects, X_train, y_train, X_test, y_test, test_subj,
-            dann_batch, dann_epochs, device, results):
+           dann_batch, dann_epochs, device, results):
+
+    X_train, y_train = WindowData(X_train, y_train, window=20, stride=5)
+    X_test,  y_test  = WindowData(X_test,  y_test,  window=20, stride=5)
+
+    #Reshape from (N, T, C) → (N, C, T)
+    X_train = np.transpose(X_train, (0, 2, 1))   # (N, 70, 20)
+    X_test  = np.transpose(X_test,  (0, 2, 1))   # (N, 70, 20)
+
     print(f"\n --- Training DANN on LOSO split (source={train_subjects}, target={test_subj}) ---")
 
     src_dataset = torch.utils.data.TensorDataset(
@@ -283,31 +292,31 @@ def doDANN(train_subjects, X_train, y_train, X_test, y_test, test_subj,
     )
     tgt_dataset = torch.utils.data.TensorDataset(
         torch.tensor(X_test, dtype=torch.float32),
-        torch.zeros(len(X_test), dtype=torch.long)   # unlabeled
+        torch.zeros(len(X_test), dtype=torch.long)
     )
 
     src_loader = torch.utils.data.DataLoader(src_dataset, batch_size=dann_batch, shuffle=True)
     tgt_loader = torch.utils.data.DataLoader(tgt_dataset, batch_size=dann_batch, shuffle=True)
 
     model = DANN(
-        input_dim=X_train.shape[1],
+        input_channels=X_train.shape[1],
+        window_size=X_train.shape[2],
         hidden_dim=128,
         num_classes=len(np.unique(y_train))
-    )
+    ).to(device)
 
     train_dann(model, src_loader, tgt_loader, num_epochs=dann_epochs, device=device)
 
     model.eval()
     with torch.no_grad():
         xt = torch.tensor(X_test, dtype=torch.float32).to(device)
-        class_out, _ = model(xt, alpha=0)
+        class_out, _ = model(xt)
         dann_preds = torch.argmax(class_out, dim=1).cpu().numpy()
 
     acc_dann = np.mean(dann_preds == y_test)
     results["dann"][test_subj] = acc_dann
     print(f"[DANN LOSO] Accuracy: {acc_dann:.4f}")
 
-    # run few-shot on DANN latent space, with optional finetune
     fs_results = few_shot_on_dann(
         model,
         X_train, y_train,
@@ -315,7 +324,7 @@ def doDANN(train_subjects, X_train, y_train, X_test, y_test, test_subj,
         few_shot_K=5,
         n_neighbors=3,
         alpha=0.5,
-        finetune=True,        # <-- set True to run fine-tuning on K-shot
+        finetune=True,
         ft_epochs=20,
         ft_lr=1e-3,
         device=device
@@ -328,11 +337,19 @@ def doDANN(train_subjects, X_train, y_train, X_test, y_test, test_subj,
         print("After finetune: proto = {:.4f}, knn = {:.4f}".format(
             fs_results.get('proto_after_acc'), fs_results.get('knn_after_acc')
         ))
-    
+
     results["finetune_dann"][test_subj] = fs_results
 
-    return results
+    save_dir = "results"
+    savedEncoderPath = f"{save_dir}/encoder_subject{test_subj}_epochs{dann_epochs}.pt"
+    savedHeadPath = f"{save_dir}/head_subject{test_subj}_epochs{dann_epochs}.pt"
+    os.makedirs(save_dir, exist_ok=True)
 
+    torch.save(model.encoder.state_dict(), savedEncoderPath)
+    if fs_results.get("head") is not None:
+        torch.save(fs_results["head"].state_dict(), savedHeadPath)
+
+    return results, savedEncoderPath, savedHeadPath
 
 def predictGesture(emg_frame, restClf, gestureClf, restScaler, scaler):
     """
@@ -369,10 +386,13 @@ if __name__ == '__main__':
     # restClf, gestureClf, restScaler, scaler = train(singleDict)
 
     subjectList = [1, 2, 3]
+    testSubj = 2
+    eNum = 2
     print("\nLoading EMG data from: ", subjectDir)
-    singleDict = BuildSubjectDict(subjectList, 2)
+    singleDict = BuildSubjectDict(subjectList, eNum)
     print("Subjects found:", list(singleDict.keys()))
 
 
     print("\nTraining model on data and evaluating via LOSO...")
-    results = losoEvaluate(singleDict, subjects_to_test=[3], few_shot_K=5)
+    results, _, _, _, _, _, _ = losoEvaluate(singleDict, subjects_to_test=[testSubj], few_shot_K=5)
+    plot_single_subject_results(results, subj=testSubj)

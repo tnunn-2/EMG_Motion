@@ -1,3 +1,4 @@
+# DANN.py (updated)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,137 +6,222 @@ import torch.optim as optim
 import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
 from collections import defaultdict
+from tqdm import tqdm
 
-class FeatureEncoder(nn.Module):
-    def __init__(self, input_dim=70, hidden_dim=128):
+
+# -------------------------
+# CNN Encoder (windowed)
+# -------------------------
+class CNNEncoder(nn.Module):
+    def __init__(self, input_channels=70, window_size=20, latent_dim=128):
+        """
+        input_channels: number of channels/features (70)
+        window_size: number of frames in each window (e.g. 20)
+        latent_dim: output latent dimension
+        """
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+        self.conv = nn.Sequential(
+            nn.Conv1d(input_channels, 128, kernel_size=5, padding=2),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
 
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.Conv1d(128, 128, kernel_size=5, padding=2),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+
+            nn.Conv1d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
         )
-    
-    def forward(self, x):
-        return self.net(x)
 
+        self.window_size = window_size
+        self.latent_dim = latent_dim
+        self.fc = nn.Linear(64 * window_size, latent_dim)
+
+    def forward(self, x):
+        """
+        x: (B, C=input_channels, T=window_size)
+        returns: (B, latent_dim)
+        """
+        # print("Input to encoder:", x.shape)
+        z = self.conv(x)                 # (B, 64, T)
+        # print("After conv:", z.shape)
+        z = z.reshape(z.size(0), -1)     # (B, 64*T)
+        # print("Flattened size:", z.shape)
+        z = self.fc(z)                   # (B, latent_dim)
+        return z
+
+# -------------------------
+# Gesture classifier (linear head)
+# -------------------------
 class GestureClassifier(nn.Module):
     def __init__(self, hidden_dim=128, num_classes=12):
         super().__init__()
         self.fc = nn.Linear(hidden_dim, num_classes)
-    
+
     def forward(self, h):
         return self.fc(h)
 
-from torch.autograd import Function
+# -------------------------
+# CORAL loss (covariance alignment)
+# -------------------------
+def coral_loss(source, target):
+    """
+    CORAL loss between source and target feature matrices.
+    source: (B_s, D)
+    target: (B_t, D)
+    returns scalar loss
+    """
+    # Convert to float tensors
+    source = source.float()
+    target = target.float()
 
-class GRL(Function):
-    @staticmethod
-    def forward(ctx, x, alpha):
-        ctx.alpha = alpha
-        return x.view_as(x)
-    
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.alpha * grad_output, None
+    bs = source.size(0)
+    bt = target.size(0)
+    d = source.size(1)
 
-def grad_reverse(x, alpha=1.0):
-    return GRL.apply(x, alpha)
+    # Center the features
+    src_mean = torch.mean(source, dim=0, keepdim=True)
+    tgt_mean = torch.mean(target, dim=0, keepdim=True)
+    src_c = source - src_mean
+    tgt_c = target - tgt_mean
 
+    # Covariance matrices (unbiased estimator)
+    # (D, D) matrices
+    if bs > 1:
+        cov_src = (src_c.t() @ src_c) / (bs - 1)
+    else:
+        cov_src = torch.zeros((d, d), device=source.device, dtype=source.dtype)
 
-class DomainClassifier(nn.Module):
-    def __init__(self, hidden_dim=128):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 2)
-        )
-    
-    def forward(self, h, alpha):
-        h_rev = grad_reverse(h, alpha)
-        return self.net(h_rev)
+    if bt > 1:
+        cov_tgt = (tgt_c.t() @ tgt_c) / (bt - 1)
+    else:
+        cov_tgt = torch.zeros((d, d), device=target.device, dtype=target.dtype)
 
+    loss = torch.mean((cov_src - cov_tgt) ** 2)
+    # normalize as in many implementations
+    loss = loss / (4 * (d ** 2))
+    return loss
+
+# -------------------------
+# DANN wrapper (Encoder + Classifier)
+# -------------------------
 class DANN(nn.Module):
-    def __init__(self, input_dim=70, hidden_dim=128, num_classes=12):
+    def __init__(self, input_channels=70, window_size=20, hidden_dim=128, num_classes=12):
         super().__init__()
-        self.encoder = FeatureEncoder(input_dim, hidden_dim)
+        self.encoder = CNNEncoder(input_channels, window_size, latent_dim=hidden_dim)
         self.classifier = GestureClassifier(hidden_dim, num_classes)
-        self.domain_classifier = DomainClassifier(hidden_dim)
-    
-    def forward(self, x, alpha=0.0):
+
+    def forward(self, x):
+        """
+        Forward returns logits and latent:
+          - x can be (B, C, T) windowed inputs
+        """
         h = self.encoder(x)
-        class_out = self.classifier(h)
-        domain_out = self.domain_classifier(h, alpha)
-        return class_out, domain_out
+        logits = self.classifier(h)
+        return logits, h
 
+# -------------------------
+# Training loop using CORAL
+# -------------------------
+def train_dann(model, src_loader, tgt_loader, num_epochs=30,
+               device="cpu", lambda_coral=1.0, lr=1e-3):
 
-def train_dann(model, src_loader, tgt_loader, num_epochs=30, device="cpu"):
     model.to(device)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     ce = nn.CrossEntropyLoss()
 
-    len_dataloader = min(len(src_loader), len(tgt_loader))
+    tgt_iter = iter(tgt_loader)
 
+    print("\nTraining CORAL-DANN...\n")
     for epoch in range(num_epochs):
-        model.train()
-        data_zip = zip(src_loader, tgt_loader)
 
-        p = epoch / num_epochs
-        alpha = 2. / (1.+np.exp(-10*p)) - 1
+        # Progress bar for batches
+        batch_bar = tqdm(range(len(src_loader)),
+                         desc=f"Epoch {epoch+1}/{num_epochs}",
+                         leave=False)
 
-        for batch_idx, ((xs, ys), (xt, _)) in enumerate(data_zip):
+        total_clf = 0.0
+        total_coral = 0.0
+        total_steps = 0
 
-            xs, ys = xs.to(device), ys.to(device)
+        for _ in batch_bar:
+            try:
+                xs, ys = next(iter(src_loader))
+            except StopIteration:
+                src_iter = iter(src_loader)
+                xs, ys = next(src_iter)
+
+            try:
+                xt, _ = next(tgt_iter)
+            except StopIteration:
+                tgt_iter = iter(tgt_loader)
+                xt, _ = next(tgt_iter)
+
+            xs = xs.to(device)
+            ys = ys.to(device)
             xt = xt.to(device)
 
-            domain_s = torch.zeros(len(xs), dtype=torch.long).to(device)
-            domain_t = torch.ones(len(xt), dtype=torch.long).to(device)
+            logits_s, z_s = model(xs)
+            _, z_t = model(xt)
 
-            x = torch.cat([xs, xt], dim=0)
-            domain_labels = torch.cat([domain_s, domain_t], dim=0)
-
-            class_out, domain_out = model(x, alpha)
-
-            class_out = class_out[:len(xs)]
-            
-            class_loss = ce(class_out, ys)
-            domain_loss = ce(domain_out, domain_labels)
-
-            loss = class_loss + domain_loss
+            clf_loss = ce(logits_s, ys)
+            coral = coral_loss(z_s, z_t)
+            loss = clf_loss + lambda_coral * coral
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        print(f"Epoch {epoch+1}/{num_epochs} | Class Loss={class_loss:.4f} | Domain Loss={domain_loss:.4f}")
+            total_clf += clf_loss.item()
+            total_coral += coral.item()
+            total_steps += 1
 
-# ---- Utility: get encoder latent space (numpy arrays) ----
+            batch_bar.set_postfix({"clf": f"{clf_loss.item():.3f}",
+                                   "coral": f"{coral.item():.3f}"})
+
+        print(f"Epoch {epoch+1}/{num_epochs} | "
+              f"Avg Class Loss={total_clf/total_steps:.4f} | "
+              f"Avg CORAL={total_coral/total_steps:.4f}")
+
+# -------------------------
+# Utility: get encoder latent space (numpy arrays)
+# -------------------------
 def get_latents(model, X, device="cpu", batch_size=256):
     """
     Returns numpy array latents for input X using model.encoder
-    X: numpy array (N, D)
+    X: numpy array
+       - either (N, D) raw-frame features (old style) OR
+       - (N, C, T) windowed features (preferred)
     """
+    model.to(device)
     model.eval()
     latents = []
     with torch.no_grad():
-        for i in range(0, len(X), batch_size):
-            xb = torch.tensor(X[i:i+batch_size], dtype=torch.float32).to(device)
-            h = model.encoder(xb)
-            latents.append(h.cpu().numpy())
+        if X.ndim == 2:
+            # (N, D) -> pass through encoder expecting (B, D)
+            for i in range(0, len(X), batch_size):
+                xb = torch.tensor(X[i:i+batch_size], dtype=torch.float32).to(device)
+                # If encoder is CNN (expects 3D), try to detect and reshape
+                if hasattr(model.encoder, "conv"):
+                    # treat D as channels and fake time=1
+                    xb = xb.unsqueeze(-1)  # (B, D, 1)
+                h = model.encoder(xb)
+                latents.append(h.cpu().numpy())
+        elif X.ndim == 3:
+            # (N, C, T)
+            for i in range(0, len(X), batch_size):
+                xb = torch.tensor(X[i:i+batch_size], dtype=torch.float32).to(device)
+                h = model.encoder(xb)
+                latents.append(h.cpu().numpy())
+        else:
+            raise ValueError("X must be 2D (N,D) or 3D (N,C,T).")
     return np.vstack(latents)
 
-
-# ---- Prototype in latent space ----
+# -------------------------
+# Prototype and kNN few-shot helpers (unchanged)
+# -------------------------
 def prototype_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, X_eval_latent, alpha=0.5):
-    """
-    Compute prototypes from source (X_train_latent,y_train), update with calib, evaluate on X_eval_latent.
-    alpha controls interpolation: proto = (1-alpha)*proto_source + alpha*proto_calib
-    """
     classes = np.unique(y_train)
     prototypes = {}
     for c in classes:
@@ -145,7 +231,6 @@ def prototype_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, 
         else:
             prototypes[c] = None
 
-    # integrate calib
     for c in np.unique(y_calib):
         maskc = (y_calib == c)
         if prototypes.get(c) is None:
@@ -153,19 +238,15 @@ def prototype_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, 
         else:
             prototypes[c] = (1 - alpha) * prototypes[c] + alpha * X_calib_latent[maskc].mean(axis=0)
 
-    # predict by nearest prototype
     y_pred = []
     proto_items = {c: p for c,p in prototypes.items() if p is not None}
     proto_keys = list(proto_items.keys())
     proto_vals = np.vstack([proto_items[c] for c in proto_keys])
     for x in X_eval_latent:
-        # compute distances to all prototypes
         dists = np.linalg.norm(proto_vals - x, axis=1)
         y_pred.append(proto_keys[np.argmin(dists)])
     return np.array(y_pred)
 
-
-# ---- kNN in latent space ----
 def knn_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, X_eval_latent, n_neighbors=3):
     X_pool = np.vstack([X_train_latent, X_calib_latent])
     y_pool = np.hstack([y_train, y_calib])
@@ -173,39 +254,49 @@ def knn_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, X_eval
     knn.fit(X_pool, y_pool)
     return knn.predict(X_eval_latent)
 
-
-# ---- Fine-tune encoder + linear head on K-shot (very small LR, weight decay) ----
+# -------------------------
+# Fine-tune encoder + linear head on K-shot (safe probing)
+# -------------------------
 def finetune_encoder_on_calib(model, X_calib, y_calib, device="cpu",
                               epochs=30, lr=1e-3, weight_decay=1e-4,
                               finetune_encoder=True, batch_size=32, verbose=False):
     """
     Finetune model.encoder + a small linear head on calibration data.
-    - X_calib, y_calib are numpy arrays
-    - If finetune_encoder is False, only trains linear head (fast + safer).
-    Returns: new_model (in place), and training history dict.
+    - X_calib, y_calib are numpy arrays.
+    - Handles encoder that is CNN (expects 3D) or MLP (2D).
+    Returns: head (nn.Module), history dict
     """
     model.to(device)
-    model.train()
+    # Save training state
+    was_training_model = model.training
 
-    # small classification head on top of encoder
-    # hidden_dim = list(model.encoder.net.children())[-2].out_features if hasattr(model.encoder, "net") else None
-
-    linear_layers = [l for l in model.encoder.net.children() if isinstance(l, nn.Linear)]
-    if len(linear_layers) == 0:
-        raise ValueError("No linear layers found in encoder")
-    hidden_dim = linear_layers[-1].out_features
-
-    # Instead of trying to introspect, add a new head using encoder output size by probing one sample:
+    # Probe to get feature dim: use encoder.eval() to avoid BN issues on a single sample
+    model.encoder.eval()
     with torch.no_grad():
-        probe = torch.tensor(X_calib[:1], dtype=torch.float32).to(device)
-        model.encoder.eval() 
-        h_probe = model.encoder(probe)
+        probe = None
+        if X_calib.ndim == 2:
+            # (N, D) -> maybe MLP or we will unsqueeze
+            xb = torch.tensor(X_calib[:1], dtype=torch.float32).to(device)
+            if hasattr(model.encoder, "conv"):
+                xb = xb.unsqueeze(-1)  # (1, D, 1)
+        elif X_calib.ndim == 3:
+            xb = torch.tensor(X_calib[:1], dtype=torch.float32).to(device)
+        else:
+            raise ValueError("X_calib must be 2D or 3D numpy array")
+        h_probe = model.encoder(xb)
         feat_dim = h_probe.shape[1]
 
-    num_classes = int(np.max(y_calib)) + 1 if len(y_calib)>0 else 0
+    # Restore model training state (we'll set modes properly below)
+    if was_training_model:
+        model.train()
+    else:
+        model.eval()
+
+    # Build head
+    num_classes = int(np.max(y_calib)) + 1 if len(y_calib) > 0 else 0
     head = nn.Linear(feat_dim, num_classes).to(device)
 
-    # optimizer
+    # Setup optimizer
     params = list(head.parameters())
     if finetune_encoder:
         params = list(model.encoder.parameters()) + params
@@ -213,19 +304,29 @@ def finetune_encoder_on_calib(model, X_calib, y_calib, device="cpu",
     opt = optim.Adam(params, lr=lr, weight_decay=weight_decay)
     ce = nn.CrossEntropyLoss()
 
-    # dataset
+    # Dataset (ensure shapes appropriate for encoder)
     Xc = torch.tensor(X_calib, dtype=torch.float32).to(device)
     yc = torch.tensor(y_calib, dtype=torch.long).to(device)
-
     dataset = torch.utils.data.TensorDataset(Xc, yc)
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # Train (set encoder to train if finetune_encoder True)
+    if finetune_encoder:
+        model.train()
+    else:
+        model.eval()
 
     history = {"loss": []}
     for epoch in range(epochs):
         epoch_loss = 0.0
         for xb, yb in loader:
+            # xb already has the right ndim (2 or 3) from X_calib; ensure to call encoder with expected shape
+            if xb.ndim == 2 and hasattr(model.encoder, "conv"):
+                xb_in = xb.unsqueeze(-1)  # (B, D, 1) -> treated as (B, C, T)
+            else:
+                xb_in = xb
             opt.zero_grad()
-            feats = model.encoder(xb)  # (B,feat_dim)
+            feats = model.encoder(xb_in)  # (B,feat_dim)
             logits = head(feats)
             loss = ce(logits, yb)
             loss.backward()
@@ -236,22 +337,21 @@ def finetune_encoder_on_calib(model, X_calib, y_calib, device="cpu",
         if verbose:
             print(f"Finetune epoch {epoch+1}/{epochs} loss={epoch_loss:.4f}")
 
-    # return head (torch module) — you can evaluate combined by passing encoder->head
+    # Restore model training/eval state
+    if was_training_model:
+        model.train()
+    else:
+        model.eval()
+
     return head, history
 
-
-# ---- Convenience wrapper that runs few-shot in latent space and optional finetune ----
+# -------------------------
+# few_shot_on_dann (unchanged except it supports windowed inputs)
+# -------------------------
 def few_shot_on_dann(model, X_train, y_train, X_test, y_test,
                      few_shot_K=5, n_neighbors=3, alpha=0.5,
                      finetune=False, ft_epochs=30, ft_lr=1e-3,
                      device="cpu"):
-    """
-    Runs prototype and kNN few-shot on DANN latent space. Optionally fine-tunes encoder+head on calibration set.
-    Returns dict with keys:
-      - proto_before (accuracy), knn_before (accuracy)
-      - proto_after (accuracy), knn_after (accuracy)   # after finetune if finetune=True
-      - head (if finetune) torch module for encoder->head
-    """
     # 1) get latents
     X_train_latent = get_latents(model, X_train, device=device)
     X_test_latent  = get_latents(model, X_test, device=device)
@@ -291,10 +391,9 @@ def few_shot_on_dann(model, X_train, y_train, X_test, y_test,
     y_pred_knn_before = knn_few_shot_latent(X_train_latent, y_train, X_calib_latent, y_calib, X_eval_latent, n_neighbors=n_neighbors)
     results['knn_before_acc'] = np.mean(y_pred_knn_before == y_eval)
 
-    # optional finetune encoder+head on calib (in original feature space X_calib, not latent)
+    # optional finetune encoder+head on calib (in original feature/window space)
     results['head'] = None
     if finetune:
-        # finetune on original X_calib (not latent) using encoder + new head
         head, history = finetune_encoder_on_calib(model, X_calib, y_calib, device=device,
                                                   epochs=ft_epochs, lr=ft_lr,
                                                   finetune_encoder=True, verbose=False)
@@ -306,7 +405,6 @@ def few_shot_on_dann(model, X_train, y_train, X_test, y_test,
         X_calib_latent_ft = get_latents(model, X_calib, device=device)
         X_eval_latent_ft  = get_latents(model, X_eval, device=device)
 
-        # prototypes/knn on finetuned latent space
         y_pred_proto_after = prototype_few_shot_latent(X_train_latent_ft, y_train, X_calib_latent_ft, y_calib, X_eval_latent_ft, alpha=alpha)
         results['proto_after_acc'] = np.mean(y_pred_proto_after == y_eval)
 

@@ -1,6 +1,5 @@
 import pybullet as p
 import pybullet_data
-import os
 
 def load_kuka():
     """
